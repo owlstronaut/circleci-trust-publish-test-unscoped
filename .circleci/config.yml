@@ -5,18 +5,10 @@ version: 2.1
 
 jobs:
   publish:
-    machine: true
-    resource_class: npm/trust-test-publish
+    machine:
+      image: ubuntu-2204:current
     steps:
       - checkout
-
-      - run:
-          name: "Install Node.js"
-          command: |
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-            node --version
-            npm --version
 
       - run:
           name: "Install dependencies"
@@ -71,8 +63,8 @@ jobs:
             echo "Successfully published to $REGISTRY"
 
   debug-claims:
-    machine: true
-    resource_class: npm/trust-test-publish
+    machine:
+      image: ubuntu-2204:current
     steps:
       - checkout
 
