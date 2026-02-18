@@ -1,0 +1,23 @@
+{
+  "name": "circleci-trust-publish-test-unscoped",
+  "version": "0.1.0",
+  "description": "Test package for CircleCI trusted publishing validation (unscoped)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Test passed\"",
+    "prepublishOnly": "echo \"Publishing circleci-trust-publish-test-unscoped via CircleCI trusted publishing\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/owlstronaut/circleci-trust-publish-test-unscoped.git"
+  },
+  "keywords": [
+    "npm",
+    "trusted-publishing",
+    "oidc",
+    "circleci",
+    "test"
+  ],
+  "author": "owlstronaut",
+  "license": "ISC"
+}

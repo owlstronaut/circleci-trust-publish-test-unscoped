@@ -1,0 +1,125 @@
+# CircleCI Trusted Publishing Test
+# Publishes circleci-trust-publish-test-unscoped to the real npm registry
+# using OIDC token exchange (no long-lived secrets).
+version: 2.1
+
+jobs:
+  publish:
+    machine: true
+    resource_class: npm/trust-test-publish
+    steps:
+      - checkout
+
+      - run:
+          name: "Install Node.js"
+          command: |
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            sudo apt-get install -y nodejs
+            node --version
+            npm --version
+
+      - run:
+          name: "Install dependencies"
+          command: npm install
+
+      - run:
+          name: "Publish to npm with OIDC"
+          command: |
+            REGISTRY="https://registry.npmjs.org/"
+            echo "Publishing to registry: $REGISTRY"
+
+            npm config set registry "$REGISTRY"
+
+            NPM_AUDIENCE="npm:$(echo "$REGISTRY" | sed 's|https\?://||;s|/$||')"
+            echo "Using audience: $NPM_AUDIENCE"
+
+            # Get OIDC token from CircleCI
+            OIDC_TOKEN=$(circleci run oidc get --claims "{\"aud\": \"$NPM_AUDIENCE\"}")
+
+            echo "npm version: $(npm --version)"
+            echo "OIDC token length: ${#OIDC_TOKEN}"
+
+            # Exchange OIDC token for npm token
+            echo "Exchanging OIDC token for npm token..."
+
+            PACKAGE_NAME=$(node -p "require('./package.json').name")
+            ENCODED_PKG=$(echo "$PACKAGE_NAME" | sed 's/@/%40/g; s/\//%2F/g')
+
+            EXCHANGE_RESPONSE=$(curl -s -X POST "${REGISTRY}-/npm/v1/oidc/token/exchange/package/${ENCODED_PKG}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${OIDC_TOKEN}")
+
+            echo "Exchange response: $EXCHANGE_RESPONSE"
+
+            NPM_TOKEN=$(echo "$EXCHANGE_RESPONSE" | jq -r '.token // empty')
+
+            if [ -z "$NPM_TOKEN" ]; then
+              echo "Failed to exchange OIDC token"
+              exit 1
+            fi
+
+            echo "Got npm token (length: ${#NPM_TOKEN})"
+
+            # Configure npm with the exchanged token
+            npm config set "//$(echo "$REGISTRY" | sed 's|https\?://||'):_authToken" "$NPM_TOKEN"
+
+            # Bump version for each publish
+            npm version 0.0.${CIRCLE_BUILD_NUM} --no-git-tag-version --allow-same-version || true
+
+            npm publish
+
+            echo "Successfully published to $REGISTRY"
+
+  debug-claims:
+    machine: true
+    resource_class: npm/trust-test-publish
+    steps:
+      - checkout
+
+      - run:
+          name: "Inspect OIDC token claims"
+          command: |
+            REGISTRY="https://registry.npmjs.org/"
+            echo "Target registry: $REGISTRY"
+
+            NPM_AUDIENCE="npm:$(echo "$REGISTRY" | sed 's|https\?://||;s|/$||')"
+            echo "Using audience: $NPM_AUDIENCE"
+
+            echo ""
+            echo "=== Getting OIDC token with npm audience ==="
+            OIDC_TOKEN=$(circleci run oidc get --claims "{\"aud\": \"$NPM_AUDIENCE\"}")
+
+            echo ""
+            echo "=== Decoded JWT payload (claims) ==="
+            echo "$OIDC_TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode"
+
+            echo ""
+            echo "=== Key claims for npm trusted publishing ==="
+            PAYLOAD=$(echo "$OIDC_TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null)
+            echo "iss: $(echo "$PAYLOAD" | jq -r '.iss')"
+            echo "aud: $(echo "$PAYLOAD" | jq -r '.aud')"
+            echo "sub: $(echo "$PAYLOAD" | jq -r '.sub')"
+            echo "org-id: $(echo "$PAYLOAD" | jq -r '."oidc.circleci.com/org-id"')"
+            echo "project-id: $(echo "$PAYLOAD" | jq -r '."oidc.circleci.com/project-id"')"
+            echo "pipeline-definition-id: $(echo "$PAYLOAD" | jq -r '."oidc.circleci.com/pipeline-definition-id"')"
+            echo "context-ids: $(echo "$PAYLOAD" | jq -r '."oidc.circleci.com/context-ids"')"
+            echo "vcs-origin: $(echo "$PAYLOAD" | jq -r '."oidc.circleci.com/vcs-origin"')"
+            echo "vcs-ref: $(echo "$PAYLOAD" | jq -r '."oidc.circleci.com/vcs-ref"')"
+            echo "ssh-rerun: $(echo "$PAYLOAD" | jq -r '."oidc.circleci.com/ssh-rerun"')"
+
+workflows:
+  publish-workflow:
+    jobs:
+      - publish:
+          context:
+            - main-context
+          filters:
+            branches:
+              only:
+                - main
+
+  debug-workflow:
+    jobs:
+      - debug-claims:
+          context:
+            - main-context
